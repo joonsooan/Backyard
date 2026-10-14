@@ -42,7 +42,7 @@ public static class StatusLine
 
     public static string Compose(FarmState farm, DateTimeOffset now, bool color = false)
     {
-        var coins = color ? $"{Gold}{farm.Coins}G{Reset}" : $"{farm.Coins}G";
+        var coins = color ? $"{Gold}{farm.Coins:N0}G{Reset}" : $"{farm.Coins:N0}G";
         return $"{FieldSegment(farm.Cells, farm.Rows, color)} │ {coins} │ {GrowthSegment(farm, now, color)}";
     }
 

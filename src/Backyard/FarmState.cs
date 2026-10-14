@@ -106,9 +106,12 @@ public class FarmState
         if (index < 0 || index >= Cells.Length || Cells[index] is not null)
             return false;
         var crop = Balance.Crop(cropName);
-        if (crop is null || crop.Retired || !IsUnlocked(cropName) || Coins < crop.SeedPrice)
+        if (crop is null || crop.Retired || !IsUnlocked(cropName))
             return false;
-        Coins -= crop.SeedPrice;
+        var price = crop == Balance.Crops[0] && Coins < crop.SeedPrice && !Planted.Any() ? 0 : crop.SeedPrice;
+        if (Coins < price)
+            return false;
+        Coins -= price;
         Cells[index] = new FarmCell { Crop = cropName, Stage = 0, Watered = false, StageStartedAt = now };
         return true;
     }

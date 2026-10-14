@@ -190,6 +190,19 @@ public class GrowthTests
     }
 
     [Fact]
+    public void TryPlant_GivesOneFreeCarrot_WhenBrokeWithEmptyField()
+    {
+        var state = AllUnlocked();
+        state.TryRemove(0);
+        state.Coins = 0;
+
+        Assert.False(state.TryPlant(0, "radish", T0));
+        Assert.True(state.TryPlant(0, "carrot", T0));
+        Assert.False(state.TryPlant(1, "carrot", T0));
+        Assert.Equal(0, state.Coins);
+    }
+
+    [Fact]
     public void TryExpand_ChargesRowPricesAndStopsAtMaxRows()
     {
         var state = new FarmState(T0);
