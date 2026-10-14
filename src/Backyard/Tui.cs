@@ -28,7 +28,7 @@ public static class TuiText
     public const string TooSmallQuitKey = $"esc[{TuiColors.Muted}]  quit[/]";
     public static readonly string[] ScreenNames = ["garden", "shop", "codex"];
     public const string MainKeysLine =
-        $" wasd[{TuiColors.Muted}] move │ [/]f[{TuiColors.Muted}] harvest │ [/]x[{TuiColors.Muted}] remove │ [/]tab[{TuiColors.Muted}] next │ [/]r[{TuiColors.Muted}] resize │ [/]esc[{TuiColors.Muted}] quit[/]";
+        $" wasd[{TuiColors.Muted}] move │ [/]space[{TuiColors.Muted}] harvest │ [/]x[{TuiColors.Muted}] remove │ [/]tab[{TuiColors.Muted}] next │ [/]r[{TuiColors.Muted}] resize │ [/]esc[{TuiColors.Muted}] quit[/]";
     public const string ShopKeysLine =
         $" space[{TuiColors.Muted}] buy │ [/]tab[{TuiColors.Muted}] next │ [/]r[{TuiColors.Muted}] resize │ [/]esc[{TuiColors.Muted}] quit[/]";
     public const string CodexKeysLine =
@@ -42,13 +42,16 @@ public static class TuiText
     public const string FlavorLocked = "??? (harvest {0} times to read)";
     public const string FlavorTitle = "interesting facts │ {0}";
     public const string EmptyLabel = "empty";
-    public const string PlantHint = "press a number to plant";
+    public const string PlantHint = "press a number to plant, shift+number to fill every empty cell";
     public const string LockedLabel = "locked";
     public const string LockedHint = "buy extra row in shop";
     public const string NotEnoughGold = "not enough gold";
     public const string SoldOut = "sold out";
     public const string RowItemName = "extra row";
     public const string RowItemDesc = "adds one more row to garden";
+    public const string HarvestAllItemName = "harvest all";
+    public const string HarvestAllItemDesc = "picks every ripe crop at once";
+    public const string Owned = "owned";
     public const string NeedsWater = "finish a task to water";
     public const int BarWidth = 16;
     public const char StepFilled = '▰';
@@ -208,6 +211,17 @@ public static partial class Tui
                             var visibleCells = VisibleCellCount(farm);
                             var items = ShopItems(farm);
                             gardenMessage = "";
+                            if (screen == TuiScreen.Main && FillCropIndex(key) is { } fillIndex)
+                            {
+                                if (fillIndex < Balance.Crops.Length && farm.Cells.Any(c => c is null))
+                                {
+                                    if (farm.PlantAll(Balance.Crops[fillIndex].Name, DateTimeOffset.Now) > 0)
+                                        save(farm);
+                                    else
+                                        gardenMessage = TuiText.NotEnoughGold;
+                                }
+                                continue;
+                            }
                             if (screen == TuiScreen.Main && key.KeyChar is >= '1' and <= '9'
                                 && selected < farm.Cells.Length && farm.Cells[selected] is null)
                             {
@@ -261,8 +275,9 @@ public static partial class Tui
                                         ? selected + Balance.Columns
                                         : selected % Balance.Columns;
                                     break;
-                                case ConsoleKey.F when screen == TuiScreen.Main:
-                                    if (selected < farm.Cells.Length && farm.TryHarvest(selected, DateTimeOffset.Now))
+                                case ConsoleKey.Spacebar when screen == TuiScreen.Main:
+                                    if (farm.HasHarvestAll ? farm.HarvestAllRipe(DateTimeOffset.Now) > 0
+                                            : selected < farm.Cells.Length && farm.TryHarvest(selected, DateTimeOffset.Now))
                                         save(farm);
                                     break;
                                 case ConsoleKey.X when screen == TuiScreen.Main:
@@ -301,6 +316,16 @@ public static partial class Tui
         });
         save(farm);
         return 0;
+    }
+
+    private static int? FillCropIndex(ConsoleKeyInfo key)
+    {
+        var i = "!@#$%^&*(".IndexOf(key.KeyChar);
+        if (i >= 0)
+            return i;
+        if (key.Modifiers.HasFlag(ConsoleModifiers.Shift) && key.Key is >= ConsoleKey.D1 and <= ConsoleKey.D9)
+            return key.Key - ConsoleKey.D1;
+        return null;
     }
 
     private static IReadOnlyList<string> WorkingSessions(FarmState farm) =>
@@ -389,6 +414,7 @@ public static partial class Tui
 
     private const string UnlockId = "unlock";
     private const string HiddenId = "hidden";
+    private const string HarvestAllId = "harvest-all";
 
     private static (string Name, string Price, string Desc, string Id)[] ShopItems(FarmState farm)
     {
@@ -396,7 +422,10 @@ public static partial class Tui
         {
             (TuiText.RowItemName,
                 farm.Rows >= Balance.MaxRows ? TuiText.SoldOut : $"{Balance.NextRowPrice(farm.Rows)}G",
-                TuiText.RowItemDesc, TuiText.RowItemName)
+                TuiText.RowItemDesc, TuiText.RowItemName),
+            (TuiText.HarvestAllItemName,
+                farm.HasHarvestAll ? TuiText.Owned : $"{Balance.HarvestAllPrice}G",
+                TuiText.HarvestAllItemDesc, HarvestAllId)
         };
         if (farm.NextUnlock is { } next)
         {
@@ -415,7 +444,10 @@ public static partial class Tui
         {
             case TuiText.RowItemName when farm.Rows >= Balance.MaxRows:
                 return TuiText.SoldOut;
+            case HarvestAllId when farm.HasHarvestAll:
+                return TuiText.Owned;
             case TuiText.RowItemName when !farm.TryExpand():
+            case HarvestAllId when !farm.TryBuyHarvestAll():
             case UnlockId when !farm.TryUnlock():
                 return TuiText.NotEnoughGold;
             case HiddenId:

@@ -34,6 +34,7 @@ public class FarmState
     public Dictionary<string, int> HarvestCounts { get; set; } = [];
     public Dictionary<string, DateTimeOffset> FirstHarvestAt { get; set; } = [];
     public List<string> UnlockedCrops { get; set; } = [Balance.Crops[0].Name];
+    public bool HasHarvestAll { get; set; }
 
     public FarmState()
     {
@@ -109,6 +110,32 @@ public class FarmState
             return false;
         Coins -= crop.SeedPrice;
         Cells[index] = new FarmCell { Crop = cropName, Stage = 0, Watered = false, StageStartedAt = now };
+        return true;
+    }
+
+    public int PlantAll(string cropName, DateTimeOffset now)
+    {
+        var planted = 0;
+        for (var i = 0; i < Cells.Length; i++)
+        {
+            if (Cells[i] is not null)
+                continue;
+            if (!TryPlant(i, cropName, now))
+                break;
+            planted++;
+        }
+        return planted;
+    }
+
+    public int HarvestAllRipe(DateTimeOffset now) =>
+        Enumerable.Range(0, Cells.Length).Count(i => TryHarvest(i, now));
+
+    public bool TryBuyHarvestAll()
+    {
+        if (HasHarvestAll || Coins < Balance.HarvestAllPrice)
+            return false;
+        Coins -= Balance.HarvestAllPrice;
+        HasHarvestAll = true;
         return true;
     }
 

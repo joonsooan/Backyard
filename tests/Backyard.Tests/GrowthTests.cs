@@ -260,4 +260,37 @@ public class GrowthTests
         Assert.False(state.TryPlant(0, "carrot", T0));
         Assert.False(state.TryPlant(Balance.Columns, "carrot", T0));
     }
+
+    [Fact]
+    public void PlantAll_FillsEmptyCellsUntilGoldRunsOut()
+    {
+        var state = new FarmState(T0);
+        state.Coins = 3;
+
+        Assert.Equal(3, state.PlantAll("carrot", T0));
+        Assert.Equal(0, state.Coins);
+        Assert.Equal(4, state.Planted.Count());
+        Assert.Null(state.Cells[4]);
+        Assert.Equal(0, state.PlantAll("carrot", T0));
+    }
+
+    [Fact]
+    public void HarvestAll_IsOneTimePurchaseAndHarvestsOnlyRipeCells()
+    {
+        var state = new FarmState(T0);
+        state.Coins = Balance.HarvestAllPrice + 2;
+        Assert.True(state.TryBuyHarvestAll());
+        Assert.False(state.TryBuyHarvestAll());
+        Assert.Equal(2, state.Coins);
+
+        state.PlantAll("carrot", T0);
+        state.Apply([EventAt(0)], At(5));
+        state.Coins = 1;
+        Assert.True(state.TryPlant(3, "carrot", At(5)));
+
+        Assert.Equal(3, state.HarvestAllRipe(At(5)));
+        Assert.Equal(3 * Crop("carrot").SellPrice, state.Coins);
+        Assert.Equal(3, state.HarvestCounts["carrot"]);
+        Assert.NotNull(state.Cells[3]);
+    }
 }
