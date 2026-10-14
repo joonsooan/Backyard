@@ -53,6 +53,9 @@ public static class TuiText
     public const string HarvestAllItemDesc = "picks every ripe crop at once";
     public const string Owned = "owned";
     public const string NeedsWater = "finish a task to water";
+    public const string HiddenRowsAbove = "+{0} row{1} above";
+    public const string HiddenRowsBelow = "+{0} row{1} below";
+    public const string HiddenRipe = " · {0} ripe";
     public const int BarWidth = 16;
     public const char StepFilled = '▰';
     public const char StepEmpty = '▱';
@@ -167,6 +170,13 @@ public static partial class Tui
         var screen = TuiScreen.Main;
         var quit = false;
         var farmers = new Dictionary<string, Farmer>();
+        var fieldTop = 0;
+
+        Markup Frame()
+        {
+            fieldTop = ScrollTop(fieldTop, selected / Balance.Columns, FieldFitRows(farm), VisibleRowCount(farm));
+            return View(farm, farmers, selected, fieldTop, shopSelected, codexSelected, shopMessage, gardenMessage, screen);
+        }
 
         AnsiConsole.AlternateScreen(() =>
         {
@@ -175,7 +185,7 @@ public static partial class Tui
             {
                 farm.Settle(DateTimeOffset.Now);
                 UpdateFarmers(farmers, farm, DateTimeOffset.Now);
-                AnsiConsole.Live(View(farm, farmers, selected, shopSelected, codexSelected, shopMessage, gardenMessage, screen)).Start(ctx =>
+                AnsiConsole.Live(Frame()).Start(ctx =>
                 {
                     ctx.Refresh();
                     var lastSize = (Console.WindowWidth, Console.WindowHeight);
@@ -299,7 +309,7 @@ public static partial class Tui
                         }
                         farm.Settle(DateTimeOffset.Now);
                         UpdateFarmers(farmers, farm, DateTimeOffset.Now);
-                        ctx.UpdateTarget(View(farm, farmers, selected, shopSelected, codexSelected, shopMessage, gardenMessage, screen));
+                        ctx.UpdateTarget(Frame());
                         var waited = 0;
                         while (!quit && !Console.KeyAvailable && waited < 200)
                         {
@@ -412,6 +422,19 @@ public static partial class Tui
     private static int VisibleCellCount(FarmState farm) =>
         VisibleRowCount(farm) * Balance.Columns;
 
+    private static int BodyHeight() =>
+        Math.Max(TuiText.MinHeight - 1, Console.WindowHeight - 1) - 4;
+
+    private static int FieldFitRows(FarmState farm)
+    {
+        var rows = VisibleRowCount(farm);
+        var height = BodyHeight();
+        return 3 * rows + 2 <= height ? rows : Math.Max(1, (height - 3) / 3);
+    }
+
+    public static int ScrollTop(int top, int selectedRow, int fitRows, int totalRows) =>
+        Math.Max(0, Math.Min(Math.Clamp(top, selectedRow - fitRows + 1, selectedRow), totalRows - fitRows));
+
     private const string UnlockId = "unlock";
     private const string HiddenId = "hidden";
     private const string HarvestAllId = "harvest-all";
@@ -488,10 +511,10 @@ public static partial class Tui
         return views;
     }
 
-    private static Markup View(FarmState farm, Dictionary<string, Farmer> farmers, int selected, int shopSelected, int codexSelected, string shopMessage, string gardenMessage, TuiScreen screen) =>
+    private static Markup View(FarmState farm, Dictionary<string, Farmer> farmers, int selected, int fieldTop, int shopSelected, int codexSelected, string shopMessage, string gardenMessage, TuiScreen screen) =>
         WindowTooSmall()
             ? TooSmallView()
-            : Render(farm, farmers, selected, shopSelected, codexSelected, shopMessage, gardenMessage, screen);
+            : Render(farm, farmers, selected, fieldTop, shopSelected, codexSelected, shopMessage, gardenMessage, screen);
 
     private static Markup TooSmallView() => new(string.Join("\n",
         TuiText.TooSmallTitle,
@@ -503,19 +526,18 @@ public static partial class Tui
         TuiText.TooSmallQuitKey));
 
     // Frame layout: top border, body (screen-specific), separator, key hint line. Sizes follow the console window.
-    private static Markup Render(FarmState farm, Dictionary<string, Farmer> farmers, int selected, int shopSelected, int codexSelected, string shopMessage, string gardenMessage, TuiScreen screen)
+    private static Markup Render(FarmState farm, Dictionary<string, Farmer> farmers, int selected, int fieldTop, int shopSelected, int codexSelected, string shopMessage, string gardenMessage, TuiScreen screen)
     {
         var frameWidth = Math.Max(TuiText.MinWidth, Console.WindowWidth - 2);
-        var frameHeight = Math.Max(TuiText.MinHeight - 1, Console.WindowHeight - 1);
         var inner = frameWidth - 2;
 
         var cells = CellViews(farm, DateTimeOffset.Now);
-        var bodyHeight = frameHeight - 4;
+        var bodyHeight = BodyHeight();
         var (body, keys) = screen switch
         {
             TuiScreen.Shop => (ShopBody(farm, inner, bodyHeight, shopSelected, shopMessage), TuiText.ShopKeysLine),
             TuiScreen.Codex => (CodexBody(farm, inner, bodyHeight, codexSelected), TuiText.CodexKeysLine),
-            _ => (MainBody(farm, farmers, cells, selected, gardenMessage, inner, bodyHeight), TuiText.MainKeysLine)
+            _ => (MainBody(farm, farmers, cells, selected, fieldTop, gardenMessage, inner, bodyHeight), TuiText.MainKeysLine)
         };
 
         var lines = new List<string> { TopBorder(screen, farm, frameWidth) };
@@ -531,18 +553,37 @@ public static partial class Tui
 
     private const int FieldSideMargin = 3;
 
-    private static List<string> MainBody(FarmState farm, Dictionary<string, Farmer> farmers, TuiCell[] cells, int selected, string gardenMessage, int inner, int bodyHeight)
+    private static List<string> MainBody(FarmState farm, Dictionary<string, Farmer> farmers, TuiCell[] cells, int selected, int fieldTop, string gardenMessage, int inner, int bodyHeight)
     {
         var leftWidth = FieldWidth(Balance.Columns) + FieldSideMargin * 2;
         var panelWidth = Math.Max(3, inner - leftWidth - 1);
         var now = DateTimeOffset.Now;
         var keys = WorkingSessions(farm);
-        var left = FieldLines(cells, selected).ToList();
-        left.Insert(0, "");
-        left.Insert(1 + farm.Rows * 3, FarmerPathLine(farmers, keys, now));
+        var rows = VisibleRowCount(farm);
+        var shownEnd = fieldTop + FieldFitRows(farm);
+        var fieldLines = FieldLines(cells, selected).ToList();
+        var left = new List<string> { HiddenRowsHint(farm, 0, fieldTop, TuiText.HiddenRowsAbove) };
+        for (var row = fieldTop; row < shownEnd; row++)
+        {
+            left.AddRange(fieldLines.GetRange(row * 3, 3));
+            if (row == farm.Rows - 1)
+                left.Add(FarmerPathLine(farmers, keys, now));
+        }
+        if (shownEnd < rows)
+            left.Add(HiddenRowsHint(farm, shownEnd, rows, TuiText.HiddenRowsBelow));
         var panel = InfoPanel(farm, cells[selected], gardenMessage, panelWidth);
         panel.Insert(0, "");
         return Columns(left, panel, leftWidth, inner, bodyHeight);
+    }
+
+    private static string HiddenRowsHint(FarmState farm, int fromRow, int toRow, string format)
+    {
+        var count = toRow - fromRow;
+        if (count <= 0)
+            return "";
+        var ripe = farm.Cells.Skip(fromRow * Balance.Columns).Take(count * Balance.Columns).Count(c => c is { IsRipe: true });
+        var ripeText = ripe > 0 ? $"[{TuiColors.Gold}]{string.Format(TuiText.HiddenRipe, ripe)}[/]" : "";
+        return $"{new string(' ', FieldSideMargin)}[{TuiColors.Muted}]{string.Format(format, count, count == 1 ? "" : "s")}[/]{ripeText}";
     }
 
     private static readonly CropInfo[] ShopCrops = Balance.Crops.Where(c => !c.Retired).ToArray();
