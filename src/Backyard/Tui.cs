@@ -69,6 +69,15 @@ public static class TuiText
     public const char GrowingGlyph = 'v';
     public const char ReadyGlyph = 'Y';
 
+    public static readonly Dictionary<string, (string Art, string Color, bool Leaves)> RipeArt = new()
+    {
+        ["carrot"] = (@"\V/", "#ff8700", true),
+        ["radish"] = (@"\o/", "#d7005f", true),
+        ["potato"] = ("oOo", "#af875f", false),
+        ["tomato"] = ("-O-", "#d70000", true),
+        ["pumpkin"] = ("▐█▌", "#d75f00", false),
+    };
+
     public const string FarmerGlyph = "o/";
     public const string FarmerGlyphFlipped = "\\o";
     public static readonly char[] WaterFrames = [' ', ':', '.'];
@@ -619,7 +628,7 @@ public static partial class Tui
         var panel = new List<string>
         {
             $" [bold]{Markup.Escape(Trunc(cell.Crop ?? "", panelInner))}[/]",
-            $" [{GlyphColor(cell)}]{cell.Glyph}[/] [{TuiColors.Muted}]{Markup.Escape(Trunc(cell.StageLabel, panelInner - 2))}[/]",
+            $" {CellArt(cell)} [{TuiColors.Muted}]{Markup.Escape(Trunc(cell.StageLabel, panelInner - 4))}[/]",
             "",
             " " + ProgressBarMarkup(cell.Fraction, Math.Min(TuiText.BarWidth, panelInner))
         };
@@ -729,7 +738,7 @@ public static partial class Tui
         var body = new List<string>
         {
             Framed("", inner),
-            Framed($"  [{TuiColors.Muted}]{"name",-17}{"grow time",-12}{"seed price",-12}{"sell price",-12}{"harvested",-11}first harvest[/]", inner)
+            Framed($"  [{TuiColors.Muted}]{"    name",-17}{"grow time",-12}{"seed price",-12}{"sell price",-12}{"harvested",-11}first harvest[/]", inner)
         };
         var crops = CodexCrops(farm);
         for (var i = 0; i < crops.Length; i++)
@@ -739,8 +748,8 @@ public static partial class Tui
             var grow = $"{info.StageMinutes}m x {info.MaxStage}";
             var cursor = i == codexSelected ? "> " : "  ";
             var line = farm.IsUnlocked(info.Name)
-                ? $"{cursor}{Markup.Escape(info.Name),-17}{grow,-12}{$"{info.SeedPrice}G",-12}{$"{info.SellPrice}G",-12}{count,-11}{(farm.FirstHarvestAt.TryGetValue(info.Name, out var first) ? first.ToString("yyyy-MM-dd") : "-")}"
-                : $"{cursor}[{TuiColors.Muted}]{TuiText.HiddenName,-17}{"?",-12}{"?",-12}{"?",-12}{0,-11}-[/]";
+                ? $"{cursor}{RipeArt(info.Name)} {Markup.Escape(info.Name),-13}{grow,-12}{$"{info.SeedPrice}G",-12}{$"{info.SellPrice}G",-12}{count,-11}{(farm.FirstHarvestAt.TryGetValue(info.Name, out var first) ? first.ToString("yyyy-MM-dd") : "-")}"
+                : $"{cursor}[{TuiColors.Muted}]{"    " + TuiText.HiddenName,-17}{"?",-12}{"?",-12}{"?",-12}{0,-11}-[/]";
             if (i == codexSelected) line = $"[bold]{line}[/]";
             body.Add(Framed(line, inner));
         }
@@ -822,6 +831,20 @@ public static partial class Tui
         _ => TuiColors.Empty
     };
 
+    private static string RipeArt(string crop)
+    {
+        if (!TuiText.RipeArt.TryGetValue(crop, out var ripe))
+            return $" [{TuiColors.Gold}]{TuiText.ReadyGlyph}[/] ";
+        return ripe.Leaves
+            ? $"[{TuiColors.Sprout}]{ripe.Art[0]}[/][{ripe.Color}]{ripe.Art[1]}[/][{TuiColors.Sprout}]{ripe.Art[2]}[/]"
+            : $"[{ripe.Color}]{ripe.Art}[/]";
+    }
+
+    private static string CellArt(TuiCell cell) =>
+        cell.Glyph == TuiText.ReadyGlyph && cell.Crop is { } crop
+            ? RipeArt(crop)
+            : $" [{GlyphColor(cell)}]{cell.Glyph}[/] ";
+
     private static IEnumerable<string> FieldLines(TuiCell[] cells, int selected)
     {
         for (var start = 0; start < cells.Length; start += Balance.Columns)
@@ -845,9 +868,7 @@ public static partial class Tui
         yield return Row(i => Border(i, '┏', '┓', '┌', '┐'));
         yield return Row(i =>
         {
-            var pad = CellInnerWidth / 2;
-            var content =
-                $"{new string(' ', pad)}[{GlyphColor(cells[i])}]{cells[i].Glyph}[/]{new string(' ', CellInnerWidth - pad - 1)}";
+            var content = CellArt(cells[i]);
             return i == selected
                 ? $"[{TuiColors.SelectedBorder}]┃[/]{content}[{TuiColors.SelectedBorder}]┃[/]"
                 : $"[{TuiColors.Muted}]│[/]{content}[{TuiColors.Muted}]│[/]";
